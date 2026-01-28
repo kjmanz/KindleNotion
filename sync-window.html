@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kindle → Notion 同期</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/icon32.png">
+    <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --card-bg: #16213e;
+            --text-primary: #ffffff;
+            --text-secondary: #a0aec0;
+            --primary-color: #10b981;
+            --border-color: #2d3748;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            padding: 16px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .header .logo {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+        }
+
+        .header h1 {
+            font-size: 18px;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .sync-btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--primary-color), #34d399);
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, opacity 0.2s;
+            margin-bottom: 16px;
+        }
+
+        .sync-btn:hover {
+            transform: scale(1.02);
+        }
+
+        .sync-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            display: none;
+        }
+
+        .progress-section.show {
+            display: block;
+        }
+
+        .progress-bar-container {
+            background: var(--border-color);
+            border-radius: 8px;
+            height: 22px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(135deg, var(--primary-color), #34d399);
+            border-radius: 8px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            text-align: center;
+        }
+
+        .stat-item {
+            padding: 10px 4px;
+            background: var(--bg-color);
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .log-section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 12px;
+            max-height: calc(100vh - 320px);
+            overflow-y: auto;
+        }
+
+        .log-section h3 {
+            font-size: 13px;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+
+        .log-list {
+            list-style: none;
+            font-size: 11px;
+            line-height: 1.7;
+        }
+
+        .log-list li {
+            padding: 3px 0;
+            border-bottom: 1px solid var(--border-color);
+            word-break: break-all;
+        }
+
+        .log-list li:last-child {
+            border-bottom: none;
+        }
+
+        .log-list .success {
+            color: #10b981;
+        }
+
+        .log-list .warning {
+            color: #f59e0b;
+        }
+
+        .log-list .error {
+            color: #ef4444;
+        }
+
+        .log-list .info {
+            color: var(--text-secondary);
+        }
+
+        .complete-section {
+            text-align: center;
+            padding: 16px;
+            display: none;
+        }
+
+        .complete-section.show {
+            display: block;
+        }
+
+        .complete-section h2 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: var(--primary-color);
+        }
+
+        .complete-section p {
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            font-size: 13px;
+        }
+
+        .warning-text {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid #f59e0b;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #f59e0b;
+            display: none;
+        }
+
+        .warning-text.show {
+            display: block;
+        }
+
+        .settings-link {
+            display: block;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 12px;
+            text-decoration: none;
+        }
+
+        .settings-link:hover {
+            color: var(--primary-color);
+        }
+    </style>
+</head>
+
+<div class="container">
+    <header class="header">
+        <img src="icons/icon48.png" alt="Logo" class="logo">
+        <h1>📚 Kindle → Notion 同期</h1>
+        <p>このウィンドウを開いたまま同期を実行してください</p>
+    </header>
+
+    <button class="sync-btn" id="syncBtn">再同期</button>
+
+    <div class="warning-text" id="warningText">
+        ⚠️ 同期中はこのウィンドウを閉じないでください
+    </div>
+
+    <div class="progress-section" id="progressSection">
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="booksProcessed">0</div>
+                <div class="stat-label">処理済み</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="booksTotal">0</div>
+                <div class="stat-label">合計書籍</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="highlightsAdded">0</div>
+                <div class="stat-label">ハイライト</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="log-section">
+        <h3>同期ログ</h3>
+        <ul class="log-list" id="logList">
+            <li class="info">同期を開始しています...</li>
+        </ul>
+    </div>
+
+    <div class="complete-section" id="completeSection">
+        <h2>同期完了</h2>
+        <p id="completeSummary">0冊の書籍、0件のハイライトを同期しました</p>
+    </div>
+
+    <a href="#" class="settings-link" id="openSettings">設定</a>
+</div>
+
+<script src="sync-window.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kindle to Notion Sync</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon32.png">
+</head>
+
+<body>
+  <div class="container">
+    <header class="header">
+      <img src="../icons/icon48.png" alt="Logo" class="logo">
+      <h1>Kindle → Notion</h1>
+    </header>
+
+    <main class="main">
+      <button id="syncBtn" class="sync-btn sync-all-btn">
+        <span class="sync-icon">📚</span>
+        ハイライトを同期
+      </button>
+
+      <p class="sync-description">
+        Kindleのハイライトを<br>Notionに同期します
+      </p>
+
+      <div id="error" class="error hidden">
+        <span id="errorText"></span>
+      </div>
+
+      <div class="stats">
+        <div class="stat-item">
+          <span class="stat-label">最終同期</span>
+          <span id="lastSync" class="stat-value">--</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">同期済み書籍</span>
+          <span id="bookCount" class="stat-value">0冊</span>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <a href="#" id="openOptions" class="options-link">⚙️ 設定</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>

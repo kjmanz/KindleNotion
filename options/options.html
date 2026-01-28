@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設定 - Kindle to Notion Sync</title>
+    <link rel="stylesheet" href="options.css">
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon32.png">
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <img src="../icons/icon48.png" alt="Logo" class="logo">
+            <div>
+                <h1>Kindle to Notion Sync</h1>
+                <p class="subtitle">設定</p>
+            </div>
+        </header>
+
+        <main class="main">
+            <section class="section">
+                <h2>Notion API設定</h2>
+
+                <div class="form-group">
+                    <label for="notionToken">Integration Token</label>
+                    <input type="password" id="notionToken" placeholder="secret_xxxxxxxx...">
+                    <p class="hint">
+                        <a href="https://www.notion.so/my-integrations" target="_blank">Notion Integrations</a>
+                        でIntegrationを作成してTokenを取得してください
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label for="databaseId">Database ID</label>
+                    <input type="text" id="databaseId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    <p class="hint">
+                        データベースURLの末尾32文字（ハイフンなし）またはUUID形式
+                    </p>
+                </div>
+
+                <button id="testConnection" class="btn btn-secondary">
+                    🔗 接続テスト
+                </button>
+
+                <div id="testResult" class="test-result hidden"></div>
+            </section>
+
+            <section class="section">
+                <h2>自動同期設定</h2>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoSync">
+                        <span>定期自動同期を有効にする</span>
+                    </label>
+                </div>
+
+                <div class="form-group" id="intervalGroup">
+                    <label for="syncInterval">同期間隔</label>
+                    <select id="syncInterval">
+                        <option value="30">30分</option>
+                        <option value="60" selected>1時間</option>
+                        <option value="180">3時間</option>
+                        <option value="360">6時間</option>
+                        <option value="720">12時間</option>
+                        <option value="1440">24時間</option>
+                    </select>
+                </div>
+            </section>
+
+            <section class="section">
+                <h2>データベースの初期設定</h2>
+                <p class="description">
+                    Notionでデータベースを作成する際、以下のプロパティを追加してください：
+                </p>
+                <ul class="property-list">
+                    <li><strong>Title</strong> (title) - 書籍名（デフォルト）</li>
+                    <li><strong>Author</strong> (rich_text) - 著者名</li>
+                    <li><strong>ASIN</strong> (rich_text) - Amazon識別子</li>
+                    <li><strong>Amazon URL</strong> (url) - 商品ページリンク</li>
+                    <li><strong>Highlight Count</strong> (number) - ハイライト数</li>
+                    <li><strong>Last Synced</strong> (date) - 最終同期日時</li>
+                    <li><strong>Tags</strong> (multi_select) - ジャンルタグ（任意）</li>
+                </ul>
+            </section>
+
+            <div class="actions">
+                <button id="saveBtn" class="btn btn-primary">
+                    💾 保存
+                </button>
+            </div>
+
+            <div id="saveResult" class="save-result hidden"></div>
+        </main>
+
+        <footer class="footer">
+            <p>Kindle to Notion Sync v1.0.0</p>
+        </footer>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+
+</html>
