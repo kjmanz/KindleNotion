@@ -40,7 +40,20 @@
      * @param {Object} notionCounts - Highlight counts from Notion for cross-device sync
      */
     // ★ テストモード: 処理する書籍数を制限 (0 = 無制限)
-    const TEST_BOOK_LIMIT = 0;
+    let cachedTestBookLimit = null;
+
+    async function getTestBookLimit() {
+        if (cachedTestBookLimit !== null) {
+            return cachedTestBookLimit;
+        }
+        try {
+            const settings = await chrome.storage.sync.get(['testMode']);
+            cachedTestBookLimit = settings.testMode ? 5 : 0;
+        } catch (e) {
+            cachedTestBookLimit = 0;
+        }
+        return cachedTestBookLimit;
+    }
 
     async function extractAllBooksAuto(notionCounts = {}) {
         const allBooks = [];
@@ -81,6 +94,9 @@
         let skippedBooks = 0;
         let processedBooks = 0;
 
+        const testBookLimit = await getTestBookLimit();
+        const testModeActive = testBookLimit > 0;
+
         // First pass: collect all books to process
         const booksToProcess = [];
         for (let i = 0; i < bookContainers.length; i++) {
@@ -91,11 +107,11 @@
             // Extract highlight count from the container text
             const containerText = container.textContent || '';
             // Try multiple patterns for Japanese and English
-            const highlightMatch = containerText.match(/(\d+)\s*(?:個のハイライト|件のハイライト|ハイライト|highlights?)/i);
+            const highlightMatch = containerText.match(/(\d+)\s*(?:\u500b\u306e\u30cf\u30a4\u30e9\u30a4\u30c8|\u4ef6\u306e\u30cf\u30a4\u30e9\u30a4\u30c8|\u30cf\u30a4\u30e9\u30a4\u30c8|highlights?)/i);
             const currentHighlightCount = highlightMatch ? parseInt(highlightMatch[1], 10) : -1;
 
             // Create a unique key for this book (for local cache)
-            const bookKey = title.substring(0, 50).replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g, '_');
+            const bookKey = title.substring(0, 50).replace(/[^a-zA-Z0-9぀-ゟ゠-ヿ一-鿿]/g, '_');
             if (currentHighlightCount > 0) {
                 newCounts[bookKey] = currentHighlightCount;
             }
@@ -112,12 +128,14 @@
             }
 
             // Decision logic:
-            // 1. If book exists in Notion AND kindle highlight count unknown (-1) → skip (already synced)
-            // 2. If book exists in Notion AND kindle count > saved count → process (new highlights)
-            // 3. If book NOT in Notion → process (new book)
-            // 4. First sync (no saved counts) → process all
+            // 1. If book exists in Notion AND kindle highlight count unknown (-1) ? skip (already synced)
+            // 2. If book exists in Notion AND kindle count > saved count ? process (new highlights)
+            // 3. If book NOT in Notion ? process (new book)
+            // 4. First sync (no saved counts) ? process all
             let shouldProcess = false;
-            if (isFirstSync) {
+            if (testModeActive) {
+                shouldProcess = booksToProcess.length < testBookLimit;
+            } else if (isFirstSync) {
                 shouldProcess = true;
             } else if (existsInNotion) {
                 // Book exists in Notion - only process if we KNOW there are more highlights
@@ -140,15 +158,19 @@
         }
 
         // Apply test limit if set
-        if (TEST_BOOK_LIMIT > 0 && booksToProcess.length > TEST_BOOK_LIMIT) {
-            console.log(`[Kindle2Notion] TEST MODE: limiting to ${TEST_BOOK_LIMIT} books`);
-            booksToProcess.length = TEST_BOOK_LIMIT;
+        if (testBookLimit > 0 && booksToProcess.length > testBookLimit) {
+            console.log(`[Kindle2Notion] TEST MODE: limiting to ${testBookLimit} books`);
+            booksToProcess.length = testBookLimit;
+        }
+
+        if (testModeActive) {
+            skippedBooks = Math.max(bookContainers.length - booksToProcess.length, 0);
         }
 
         console.log(`[Kindle2Notion] Processing ${booksToProcess.length} books, skipping ${skippedBooks} unchanged books`);
 
         // Send initial log to sync window
-        sendLog('info', `${booksToProcess.length}冊を処理開始、${skippedBooks}冊スキップ`);
+        sendLog('info', `${booksToProcess.length} books to process, ${skippedBooks} skipped`);
         let totalExtractedHighlights = 0;
 
         // Second pass: process only changed books
@@ -161,35 +183,58 @@
                 sendProgress(processedBooks, booksToProcess.length, book.title, totalExtractedHighlights);
                 sendLog('info', `[${processedBooks}/${booksToProcess.length}] ${book.title.substring(0, 35)}...`);
 
-                book.container.click();
+                clickBookContainer(book.container);
 
                 // Wait for highlights to load
-                await waitForTitleUpdate(book.title);
+                let titleUpdated = await waitForTitleUpdate(book.title, book.container);
+                if (!titleUpdated) {
+                    // Retry once in case the click didn't register
+                    clickBookContainer(book.container);
+                    titleUpdated = await waitForTitleUpdate(book.title, book.container);
+                }
+                if (!titleUpdated) {
+                    if (isBookSelected(book.container)) {
+                        sendLog('warning', `Title not matched but selected, proceeding: ${book.title.substring(0, 30)}...`);
+                    } else {
+                        sendLog('warning', `Title not updated, skipping: ${book.title.substring(0, 30)}...`);
+                        continue;
+                    }
+                }
                 await delay(500);
 
                 // Extract book info and highlights
-                const highlights = extractHighlightsFromPage();
+                let highlights = extractHighlightsFromPage();
 
-                if (highlights.length > 0) {
-                    const bookData = extractBookInfoFromContainer(book.container);
+                if (highlights.length === 0) {
+                    await delay(400);
+                    highlights = extractHighlightsFromPage();
+                }
+
+                if (highlights.length > 0 || testModeActive) {
+                    let bookData = extractCurrentBook();
+                    if (!bookData) {
+                        console.log(`[Kindle2Notion] extractCurrentBook() returned null, using extractBookInfoFromContainer`);
+                        bookData = extractBookInfoFromContainer(book.container);
+                    }
                     bookData.highlights = highlights;
                     totalExtractedHighlights += highlights.length;
 
                     console.log(`[Kindle2Notion] Book "${bookData.title}": ${highlights.length} highlights extracted`);
-                    sendLog('success', `✓ ${highlights.length}件のハイライト`);
+                    console.log(`[Kindle2Notion] Book data:`, { title: bookData.title, author: bookData.author, amazonUrl: bookData.amazonUrl, coverUrl: bookData.coverUrl, highlightCount: highlights.length });
+                    sendLog('success', `${highlights.length} highlights`);
                     // Update highlight count in progress
                     sendProgress(processedBooks, booksToProcess.length, null, totalExtractedHighlights);
                     allBooks.push(bookData);
                 } else {
-                    sendLog('warning', `✗ ハイライトなし`);
+                    sendLog('warning', 'No highlights');
                 }
 
                 // Small delay between books for stability
-                await delay(300);
+                await delay(150);
 
             } catch (error) {
                 console.error(`[Kindle2Notion] Error processing book "${book.title}":`, error);
-                sendLog('error', `エラー: ${book.title.substring(0, 30)}`);
+                sendLog('error', `Error: ${book.title.substring(0, 30)}`);
             }
         }
 
@@ -215,7 +260,7 @@
         const bookContainers = document.querySelectorAll('.kp-notebook-library-each-book');
 
         // Send initial progress
-        sendProgress(0, bookContainers.length, 'スキャン開始...');
+        sendProgress(0, bookContainers.length, 'Scanning...');
 
         if (bookContainers.length === 0) {
             const singleBook = extractCurrentBook();
@@ -230,9 +275,11 @@
         const savedCounts = savedData.bookHighlightCounts || {};
         const newCounts = {};
         const isFirstSync = Object.keys(savedCounts).length === 0;
+        const testBookLimit = await getTestBookLimit();
+        const testModeActive = testBookLimit > 0;
 
         if (isFirstSync) {
-            sendLog('info', '初回同期: 全書籍を処理します');
+            sendLog('info', 'First sync: processing all books');
         }
 
         // First pass: identify books to process
@@ -243,23 +290,35 @@
             const title = titleEl ? titleEl.textContent.trim() : `book_${i}`;
 
             const containerText = container.textContent || '';
-            const highlightMatch = containerText.match(/(\d+)\s*(?:個のハイライト|ハイライト|highlights?)/i);
+            const highlightMatch = containerText.match(/(\d+)\s*(?:\u500b\u306e\u30cf\u30a4\u30e9\u30a4\u30c8|\u30cf\u30a4\u30e9\u30a4\u30c8|highlights?)/i);
             const currentHighlightCount = highlightMatch ? parseInt(highlightMatch[1], 10) : -1; // -1 means unknown
 
-            const bookKey = title.substring(0, 50).replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g, '_');
+            const bookKey = title.substring(0, 50).replace(/[^a-zA-Z0-9぀-ゟ゠-ヿ一-鿿]/g, '_');
             if (currentHighlightCount > 0) {
                 newCounts[bookKey] = currentHighlightCount;
             }
 
             const savedCount = savedCounts[bookKey] || 0;
 
-            // Process if: first sync OR highlight count changed OR count is unknown (will check by extracting)
-            if (isFirstSync || currentHighlightCount !== savedCount || currentHighlightCount === -1) {
-                booksToProcess.push({ index: i, container, title, highlightCount: currentHighlightCount, bookKey });
+            if (testModeActive) {
+                if (booksToProcess.length < testBookLimit) {
+                    booksToProcess.push({ index: i, container, title, highlightCount: currentHighlightCount, bookKey });
+                }
+            } else {
+                // Process if: first sync OR highlight count changed OR count is unknown (will check by extracting)
+                if (isFirstSync || currentHighlightCount !== savedCount || currentHighlightCount === -1) {
+                    booksToProcess.push({ index: i, container, title, highlightCount: currentHighlightCount, bookKey });
+                }
             }
         }
 
-        sendLog('info', `${booksToProcess.length}冊の変更を検出 (${bookContainers.length - booksToProcess.length}冊スキップ)`);
+        // Apply test limit if set
+        if (testBookLimit > 0 && booksToProcess.length > testBookLimit) {
+            console.log(`[Kindle2Notion] TEST MODE: limiting to ${testBookLimit} books`);
+            booksToProcess.length = testBookLimit;
+        }
+
+        sendLog('info', `${booksToProcess.length} changed (${bookContainers.length - booksToProcess.length} skipped)`);
 
         // Second pass: process changed books with progress
         for (let i = 0; i < booksToProcess.length; i++) {
@@ -267,23 +326,46 @@
 
             try {
                 sendProgress(i + 1, booksToProcess.length, book.title);
-                book.container.click();
-                await waitForTitleUpdate(book.title);
+                clickBookContainer(book.container);
+                let titleUpdated = await waitForTitleUpdate(book.title, book.container);
+                if (!titleUpdated) {
+                    // Retry once in case the click didn't register
+                    clickBookContainer(book.container);
+                    titleUpdated = await waitForTitleUpdate(book.title, book.container);
+                }
+                if (!titleUpdated) {
+                    if (isBookSelected(book.container)) {
+                        sendLog('warning', `Title not matched but selected, proceeding: ${book.title.substring(0, 30)}...`);
+                    } else {
+                        sendLog('warning', `Title not updated, skipping: ${book.title.substring(0, 30)}...`);
+                        continue;
+                    }
+                }
                 await delay(500);
 
-                const highlights = extractHighlightsFromPage();
+                let highlights = extractHighlightsFromPage();
 
-                if (highlights.length > 0) {
-                    const bookData = extractBookInfoFromContainer(book.container);
-                    bookData.highlights = highlights;
-                    allBooks.push(bookData);
-                    sendLog('success', `${book.title.substring(0, 30)}... (${highlights.length}件)`);
+                if (highlights.length === 0) {
+                    await delay(400);
+                    highlights = extractHighlightsFromPage();
                 }
 
-                await delay(300);
+                if (highlights.length > 0 || testModeActive) {
+                    let bookData = extractCurrentBook();
+                    if (!bookData) {
+                        console.log(`[Kindle2Notion] extractCurrentBook() returned null, using extractBookInfoFromContainer`);
+                        bookData = extractBookInfoFromContainer(book.container);
+                    }
+                    bookData.highlights = highlights;
+                    console.log(`[Kindle2Notion] Book data:`, { title: bookData.title, author: bookData.author, amazonUrl: bookData.amazonUrl, coverUrl: bookData.coverUrl, highlightCount: highlights.length });
+                    allBooks.push(bookData);
+                    sendLog('success', `${book.title.substring(0, 30)}... (${highlights.length} highlights)`);
+                }
+
+                await delay(150);
 
             } catch (error) {
-                sendLog('error', `エラー: ${book.title.substring(0, 30)}...`);
+                sendLog('error', `Error: ${book.title.substring(0, 30)}...`);
                 console.error(`[Kindle2Notion] Error:`, error);
             }
         }
@@ -330,14 +412,19 @@
         const titleEl = container.querySelector('h2');
         const title = titleEl ? titleEl.textContent.trim() : 'Unknown Title';
 
+        console.log(`[Kindle2Notion] extractBookInfoFromContainer for: ${title}`);
+
         // Find author
         let author = '';
         const pElements = container.querySelectorAll('p');
+        console.log(`[Kindle2Notion] Found ${pElements.length} <p> elements in container`);
         for (const p of pElements) {
             const text = p.textContent.trim();
-            if (text && !text.includes('ハイライト') && !text.includes('メモ')) {
+            console.log(`[Kindle2Notion] <p> text: "${text}"`);
+            if (text && !text.includes('ハイライト') && !text.includes('メモ') && !text.includes('highlights')) {
                 const match = text.match(/著者[:：]\s*(.+)/) || [null, text];
                 author = match[1].replace(/著者[:：]\s*/, '').trim();
+                console.log(`[Kindle2Notion] Author extracted: "${author}"`);
                 break;
             }
         }
@@ -444,6 +531,45 @@
     }
 
     /**
+     * Click a book container reliably
+     */
+    function clickBookContainer(container) {
+        if (!container) return false;
+        const targets = [
+            container.querySelector('a'),
+            container.querySelector('h2'),
+            container
+        ].filter(Boolean);
+
+        for (const target of targets) {
+            try {
+                target.scrollIntoView({ block: 'center' });
+                // Click via events for reliability
+                const eventInit = { bubbles: true, cancelable: true, view: window };
+                target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+                target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+                target.dispatchEvent(new MouseEvent('click', eventInit));
+                return true;
+            } catch (e) {
+                // Try next target
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if a book container is selected
+     */
+    function isBookSelected(container) {
+        if (!container) return false;
+        if (container.classList.contains('kp-notebook-selected')) return true;
+        const ariaSelected = container.getAttribute('aria-selected');
+        if (ariaSelected === 'true') return true;
+        const selectedChild = container.querySelector('[aria-selected="true"], .kp-notebook-selected');
+        return !!selectedChild;
+    }
+
+    /**
      * Delay helper
      */
     function delay(ms) {
@@ -453,28 +579,141 @@
     /**
      * Wait for the right panel to update with the expected book title
      */
-    async function waitForTitleUpdate(expectedTitle, timeout = 5000) {
+    async function waitForTitleUpdate(expectedTitle, container, timeout = 8000) {
         if (!expectedTitle) return true;
-        // Normalize titles for comparison: remove spaces and take first 10 chars
-        // This handles cases where subtitles or series names might be truncated or formatted differently
-        const simplifiedExpected = expectedTitle.replace(/\s+/g, '').substring(0, 10);
 
-        const startTime = Date.now();
-        while (Date.now() - startTime < timeout) {
-            const rightPanelTitleEl = document.querySelector('.kp-notebook-metadata h3, h2.kp-notebook-searchable');
-            if (rightPanelTitleEl) {
-                const currentTitle = rightPanelTitleEl.textContent.trim();
-                const simplifiedCurrent = currentTitle.replace(/\s+/g, '').substring(0, 10);
+        const normalizeTitle = (title) => title
+            .replace(/[\s\u3000\u002d\u2010-\u2015\u003a\uff1a\u30fb\u3001\u3002\uff01\uff1f\u0021\u003f\u002c\u002e\u0028\u0029\uff08\uff09\u3010\u3011\u005b\u005d]/g, '')
+            .substring(0, 30);
 
-                // Check match
-                if (simplifiedCurrent.includes(simplifiedExpected) || simplifiedExpected.includes(simplifiedCurrent)) {
+        const splitTitle = (title) => title
+            .split(/[\u3000\u003a\uff1a\u30fb\u2010-\u2015\u002d\u2013\u2014\u301c\u007c]/)
+            .map(part => part.trim())
+            .filter(Boolean);
+
+        const expectedVariants = new Set();
+        const expectedNorm = normalizeTitle(expectedTitle);
+        expectedVariants.add(expectedNorm);
+        for (const part of splitTitle(expectedTitle)) {
+            expectedVariants.add(normalizeTitle(part));
+        }
+        if (expectedNorm.length > 10) {
+            expectedVariants.add(expectedNorm.substring(0, 10));
+        }
+        if (expectedNorm.length > 15) {
+            expectedVariants.add(expectedNorm.substring(0, 15));
+        }
+
+        const matchesExpected = (currentTitle) => {
+            if (!currentTitle) return false;
+            const norm = normalizeTitle(currentTitle);
+            for (const variant of expectedVariants) {
+                if (!variant) continue;
+                if (norm.includes(variant) || variant.includes(norm)) {
                     return true;
                 }
             }
-            await delay(200);
-        }
-        console.warn(`[Kindle2Notion] Timeout waiting for title: expected "${expectedTitle}" (simplified: ${simplifiedExpected})`);
-        return false;
+            return false;
+        };
+
+        const titleSelectors = [
+            '.kp-notebook-metadata h3',
+            'h2.kp-notebook-searchable',
+            'span.kp-notebook-searchable',
+            '#kp-notebook-annotations h2',
+            '.kp-notebook-annotations h2',
+            '.kp-notebook-metadata h2'
+        ];
+
+        const readRightPanelTitle = () => {
+            for (const selector of titleSelectors) {
+                const el = document.querySelector(selector);
+                if (el && el.textContent.trim()) {
+                    return el.textContent.trim();
+                }
+            }
+            return '';
+        };
+
+        const readHighlightSignature = () => {
+            const annotationsRoot = document.querySelector(
+                '#kp-notebook-annotations, .kp-notebook-annotations-container, [id*="annotations"]'
+            );
+            const searchRoot = annotationsRoot || document;
+            const highlightSelectors = [
+                '.kp-notebook-highlight',
+                '[data-annotation-type="highlight"]',
+                '[id^="annotationHighlight"]',
+                '#highlight',
+                '[id*="highlight"]'
+            ];
+
+            let highlightEls = [];
+            for (const selector of highlightSelectors) {
+                const els = Array.from(searchRoot.querySelectorAll(selector))
+                    .filter(el => !el.closest('.kp-notebook-library, .kp-notebook-library-each-book'));
+                if (els.length > 0) {
+                    highlightEls = els;
+                    break;
+                }
+            }
+
+            if (highlightEls.length === 0) {
+                return '';
+            }
+
+            const firstText = highlightEls[0].textContent.trim();
+            return `${highlightEls.length}|${firstText.substring(0, 50)}`;
+        };
+
+        const initialSignature = readHighlightSignature();
+
+        const isReady = () => {
+            const currentTitle = readRightPanelTitle();
+            if (matchesExpected(currentTitle)) {
+                return true;
+            }
+            const currentSignature = readHighlightSignature();
+            if (currentSignature && currentSignature !== initialSignature && isBookSelected(container)) {
+                return true;
+            }
+            return false;
+        };
+
+        if (isReady()) return true;
+
+        return await new Promise((resolve) => {
+            let done = false;
+            const finish = (ok) => {
+                if (done) return;
+                done = true;
+                observer.disconnect();
+                clearInterval(interval);
+                clearTimeout(timer);
+                resolve(ok);
+            };
+
+            const annotationsRoot = document.querySelector(
+                '#kp-notebook-annotations, .kp-notebook-annotations-container, [id*="annotations"]'
+            );
+            const target = annotationsRoot || document.body || document.documentElement;
+
+            const observer = new MutationObserver(() => {
+                if (isReady()) finish(true);
+            });
+
+            if (target) {
+                observer.observe(target, { childList: true, subtree: true, characterData: true });
+            }
+
+            const interval = setInterval(() => {
+                if (isReady()) finish(true);
+            }, 200);
+
+            const timer = setTimeout(() => {
+                finish(false);
+            }, timeout);
+        });
     }
 
     /**
@@ -941,39 +1180,46 @@
      */
     function extractHighlightsFromPage() {
         const highlights = [];
+        // Prefer searching within the annotations panel to avoid left-side list elements
+        const annotationsRoot = document.querySelector(
+            '#kp-notebook-annotations, .kp-notebook-annotations-container, [id*="annotations"]'
+        );
+        const searchRoot = annotationsRoot || document;
 
-        // Try multiple selectors for highlights
+        // Try multiple selectors for highlights (keep these reasonably specific)
         const highlightSelectors = [
             '.kp-notebook-highlight',
+            '[data-annotation-type="highlight"]',
+            '[id^="annotationHighlight"]',
             '#highlight',
-            '[id*="highlight"]',
-            '.a-size-base-plus',
-            '.kp-notebook-annotation span',
-            'span[id*="annotation"]'
+            '[id*="highlight"]'
         ];
 
         let highlightEls = [];
         for (const selector of highlightSelectors) {
-            const els = document.querySelectorAll(selector);
+            const els = Array.from(searchRoot.querySelectorAll(selector))
+                .filter(el => !el.closest('.kp-notebook-library, .kp-notebook-library-each-book'));
             console.log(`[Kindle2Notion] Highlight selector "${selector}": found ${els.length} elements`);
-            if (els.length > 0 && highlightEls.length === 0) {
+            if (els.length > 0) {
                 highlightEls = els;
+                break;
             }
         }
 
         // If still no highlights found, try looking for any text content in annotation containers
         if (highlightEls.length === 0) {
             console.log('[Kindle2Notion] No highlights found with standard selectors, trying annotation containers...');
-            const containers = document.querySelectorAll('[class*="annotation"], [id*="annotation"]');
+            const containers = searchRoot.querySelectorAll('[class*="annotation"], [id*="annotation"]');
             console.log(`[Kindle2Notion] Found ${containers.length} annotation containers`);
 
-            containers.forEach((container, index) => {
+            containers.forEach(container => {
+                if (container.closest('.kp-notebook-library, .kp-notebook-library-each-book')) return;
                 // Get text content that might be a highlight
                 const textNodes = container.querySelectorAll('span, div');
                 textNodes.forEach(node => {
                     const text = node.textContent.trim();
                     // Filter out short texts or location markers
-                    if (text && text.length > 20 && !text.match(/^(位置|Page|Location|ハイライト)/)) {
+                    if (text && text.length > 20 && !text.match(/^(Page|Location|Highlight|Note)\\b/i)) {
                         highlights.push({
                             text,
                             location: '',
@@ -986,7 +1232,6 @@
             console.log(`[Kindle2Notion] Found ${highlights.length} highlights from annotation containers`);
             return highlights;
         }
-
         highlightEls.forEach((el, index) => {
             const text = el.textContent.trim();
             if (text) {
