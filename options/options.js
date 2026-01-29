@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const syncIntervalSelect = document.getElementById('syncInterval');
     const intervalGroup = document.getElementById('intervalGroup');
     const testModeCheckbox = document.getElementById('testMode');
+    const autoCloseWindowCheckbox = document.getElementById('autoCloseWindow');
     const testConnectionBtn = document.getElementById('testConnection');
     const testResultDiv = document.getElementById('testResult');
     const saveBtn = document.getElementById('saveBtn');
@@ -61,7 +62,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             databaseId: databaseIdInput.value.trim(),
             autoSync: autoSyncCheckbox.checked,
             syncInterval: parseInt(syncIntervalSelect.value, 10),
-            testMode: testModeCheckbox.checked
+            testMode: testModeCheckbox.checked,
+            autoCloseWindow: autoCloseWindowCheckbox.checked
         };
 
         if (!settings.notionToken || !settings.databaseId) {
@@ -97,7 +99,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'databaseId',
             'autoSync',
             'syncInterval',
-            'testMode'
+            'testMode',
+            'autoCloseWindow'
         ]);
 
         if (settings.notionToken) {
@@ -114,6 +117,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (settings.testMode !== undefined) {
             testModeCheckbox.checked = settings.testMode;
+        }
+        if (settings.autoCloseWindow !== undefined) {
+            autoCloseWindowCheckbox.checked = settings.autoCloseWindow;
+        } else {
+            // Default: auto close enabled
+            autoCloseWindowCheckbox.checked = true;
         }
 
         // Set initial visibility of interval group

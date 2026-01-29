@@ -175,15 +175,23 @@ async function startSync() {
 
         addLog('success', `${response.books.length}冊の書籍を抽出完了`);
 
-        // Count total highlights
+        // Count total highlights and log book data
         let extractedHighlights = 0;
-        response.books.forEach(book => {
+        response.books.forEach((book, index) => {
             extractedHighlights += book.highlights.length;
+            console.log(`[Sync Window] Book ${index + 1}:`, {
+                title: book.title,
+                author: book.author,
+                amazonUrl: book.amazonUrl,
+                coverUrl: book.coverUrl,
+                highlightCount: book.highlights.length
+            });
         });
         addLog('info', `合計 ${extractedHighlights} 件のハイライトを抽出`);
 
         // Now sync to Notion - reset progress bar for Notion phase
         addLog('info', 'Notionへの同期を開始...');
+        console.log(`[Sync Window] Sending ${response.books.length} books to Notion...`);
         progressBar.style.width = '0%';
         progressBar.textContent = '0%';
         booksProcessed.textContent = 0;
@@ -193,6 +201,8 @@ async function startSync() {
             action: 'syncToNotion',
             books: response.books
         });
+
+        console.log(`[Sync Window] Notion sync result:`, syncResult);
 
         if (syncResult.error) {
             throw new Error(syncResult.error);
@@ -293,28 +303,42 @@ function addLog(type, message) {
     }
 }
 
-function showComplete(processed, newBooks, newHighlights) {
+async function showComplete(processed, newBooks, newHighlights) {
     progressBar.style.width = '100%';
     progressBar.textContent = '100%';
     completeSection.classList.add('show');
     completeSummary.textContent = `${processed}冊処理、${newBooks}冊追加、${newHighlights}件のハイライトを同期しました`;
 
-    // Auto close after 5 seconds
-    let countdown = 5;
-    const countdownEl = document.createElement('p');
-    countdownEl.style.marginTop = '10px';
-    countdownEl.style.fontSize = '13px';
-    countdownEl.style.color = '#9ca3af';
-    completeSection.appendChild(countdownEl);
+    // Check if auto close is enabled
+    const settings = await chrome.storage.sync.get(['autoCloseWindow']);
+    const autoClose = settings.autoCloseWindow !== undefined ? settings.autoCloseWindow : true; // Default: true
 
-    const updateCountdown = () => {
-        countdownEl.textContent = `このウィンドウは ${countdown} 秒後に自動で閉じます`;
-        countdown--;
-        if (countdown < 0) {
-            window.close();
-        } else {
-            setTimeout(updateCountdown, 1000);
-        }
-    };
-    updateCountdown();
+    if (autoClose) {
+        // Auto close after 5 seconds
+        let countdown = 5;
+        const countdownEl = document.createElement('p');
+        countdownEl.style.marginTop = '10px';
+        countdownEl.style.fontSize = '13px';
+        countdownEl.style.color = '#9ca3af';
+        completeSection.appendChild(countdownEl);
+
+        const updateCountdown = () => {
+            countdownEl.textContent = `このウィンドウは ${countdown} 秒後に自動で閉じます`;
+            countdown--;
+            if (countdown < 0) {
+                window.close();
+            } else {
+                setTimeout(updateCountdown, 1000);
+            }
+        };
+        updateCountdown();
+    } else {
+        // Show manual close message
+        const messageEl = document.createElement('p');
+        messageEl.style.marginTop = '10px';
+        messageEl.style.fontSize = '13px';
+        messageEl.style.color = '#9ca3af';
+        messageEl.textContent = 'コンソールログを確認後、このウィンドウを手動で閉じてください';
+        completeSection.appendChild(messageEl);
+    }
 }

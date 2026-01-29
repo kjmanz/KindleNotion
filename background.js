@@ -99,6 +99,8 @@ async function syncBooksToNotion(books) {
     for (let i = 0; i < books.length; i++) {
         const book = books[i];
         try {
+            console.log(`[Notion Sync] Processing book ${i + 1}/${books.length}:`, book);
+
             // Send progress to sync window
             broadcastProgress(i + 1, books.length, book.title, newHighlights);
             broadcastLog('info', `[Notion ${i + 1}/${books.length}] ${book.title.substring(0, 35)}...`);
@@ -107,19 +109,26 @@ async function syncBooksToNotion(books) {
             let page = null;
 
             if (book.title) {
+                console.log(`[Notion Sync] Searching for book: "${book.title}"`);
                 page = await client.findBookByTitle(databaseId, book.title);
+                console.log(`[Notion Sync] Search result:`, page ? `Found (${page.id})` : 'Not found');
             }
 
             if (page) {
                 // Book exists - check for new highlights
+                console.log(`[Notion Sync] Book exists, checking for new highlights...`);
                 const existingHighlights = await client.getExistingHighlights(page.id);
+                console.log(`[Notion Sync] Existing highlights: ${existingHighlights.length}`);
+
                 const newHighlightsList = book.highlights.filter(h =>
                     !existingHighlights.some(existing =>
                         existing.includes(h.text.substring(0, 50)) // Match by first 50 chars
                     )
                 );
+                console.log(`[Notion Sync] New highlights to add: ${newHighlightsList.length}`);
 
                 if (newHighlightsList.length > 0) {
+                    console.log(`[Notion Sync] Adding ${newHighlightsList.length} new highlights...`);
                     await client.addHighlightBlocks(page.id, newHighlightsList);
                     newHighlights += newHighlightsList.length;
 
@@ -134,12 +143,24 @@ async function syncBooksToNotion(books) {
                 }
             } else {
                 // New book - create page and add highlights
+                console.log(`[Notion Sync] Creating new book page...`);
+                console.log(`[Notion Sync] Book data to create:`, {
+                    title: book.title,
+                    author: book.author,
+                    amazonUrl: book.amazonUrl,
+                    coverUrl: book.coverUrl,
+                    highlightCount: book.highlights.length
+                });
+
                 page = await client.createBookPage(databaseId, book);
+                console.log(`[Notion Sync] Book page created: ${page.id}`);
                 newBooks++;
 
                 if (book.highlights.length > 0) {
+                    console.log(`[Notion Sync] Adding ${book.highlights.length} highlights to new page...`);
                     await client.addHighlightBlocks(page.id, book.highlights);
                     newHighlights += book.highlights.length;
+                    console.log(`[Notion Sync] Highlights added successfully`);
                 }
                 broadcastLog('success', `✓ 新規書籍を追加 (${book.highlights.length}件のハイライト)`);
             }
