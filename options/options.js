@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const autoSyncCheckbox = document.getElementById('autoSync');
     const syncIntervalSelect = document.getElementById('syncInterval');
     const intervalGroup = document.getElementById('intervalGroup');
+    const testModeCheckbox = document.getElementById('testMode');
     const testConnectionBtn = document.getElementById('testConnection');
     const testResultDiv = document.getElementById('testResult');
     const saveBtn = document.getElementById('saveBtn');
@@ -59,7 +60,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             notionToken: notionTokenInput.value.trim(),
             databaseId: databaseIdInput.value.trim(),
             autoSync: autoSyncCheckbox.checked,
-            syncInterval: parseInt(syncIntervalSelect.value, 10)
+            syncInterval: parseInt(syncIntervalSelect.value, 10),
+            testMode: testModeCheckbox.checked
         };
 
         if (!settings.notionToken || !settings.databaseId) {
@@ -94,7 +96,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'notionToken',
             'databaseId',
             'autoSync',
-            'syncInterval'
+            'syncInterval',
+            'testMode'
         ]);
 
         if (settings.notionToken) {
@@ -108,6 +111,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (settings.syncInterval) {
             syncIntervalSelect.value = settings.syncInterval.toString();
+        }
+        if (settings.testMode !== undefined) {
+            testModeCheckbox.checked = settings.testMode;
         }
 
         // Set initial visibility of interval group
