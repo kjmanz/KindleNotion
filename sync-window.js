@@ -88,7 +88,7 @@ async function startSync() {
             addLog('success', 'Content Script注入完了');
         } catch (e) {
             addLog('error', `Script注入エラー: ${e.message}`);
-            finishSync();
+            await finishSync();
             return;
         }
 
@@ -105,14 +105,14 @@ async function startSync() {
             addLog('info', `getBookCount結果: ${JSON.stringify(countResponse)}`);
         } catch (e) {
             addLog('error', `通信エラー: ${e.message}`);
-            finishSync();
+            await finishSync();
             return;
         }
 
         if (!countResponse || countResponse.count === undefined) {
             addLog('error', '書籍数を取得できませんでした');
             addLog('info', 'Kindleページで書籍一覧が表示されているか確認してください');
-            finishSync();
+            await finishSync();
             return;
         }
 
@@ -122,7 +122,7 @@ async function startSync() {
         if (countResponse.count === 0) {
             addLog('warning', '書籍が見つかりません');
             addLog('info', 'Kindleタブでログインしているか確認してください');
-            finishSync();
+            await finishSync();
             return;
         }
 
@@ -154,13 +154,13 @@ async function startSync() {
             addLog('info', `抽出結果: ${response ? response.books?.length + '冊' : 'null'}`);
         } catch (e) {
             addLog('error', `抽出エラー: ${e.message}`);
-            finishSync();
+            await finishSync();
             return;
         }
 
         if (response && response.error) {
             addLog('error', response.error);
-            finishSync();
+            await finishSync();
             return;
         }
 
@@ -169,7 +169,7 @@ async function startSync() {
             addLog('info', 'キャッシュ済み、または変更なしの可能性があります');
             completeSection.classList.add('show');
             completeSummary.textContent = '同期する書籍がありませんでした';
-            finishSync();
+            await finishSync();
             return;
         }
 
@@ -228,19 +228,27 @@ async function startSync() {
         addLog('error', `エラー: ${error.message}`);
         console.error('Sync error:', error);
     } finally {
-        finishSync();
+        await finishSync();
     }
 }
 
-function finishSync() {
+async function finishSync() {
     isSyncing = false;
     syncBtn.disabled = false;
     syncBtn.textContent = '再同期';
     warningText.classList.remove('show');
 
-    // Close Kindle tab
+    // Close Kindle tab based on settings
+    const settings = await chrome.storage.sync.get(['autoCloseWindow']);
+    const autoClose = settings.autoCloseWindow !== undefined ? settings.autoCloseWindow : true; // Default: true
+
     if (kindleTabId) {
-        chrome.tabs.remove(kindleTabId).catch(() => { });
+        if (autoClose) {
+            console.log('[Sync Window] Auto-closing Kindle tab...');
+            chrome.tabs.remove(kindleTabId).catch(() => { });
+        } else {
+            console.log('[Sync Window] Keeping Kindle tab open (autoCloseWindow is disabled)');
+        }
         kindleTabId = null;
     }
 }
